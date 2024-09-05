@@ -70,4 +70,6 @@ def main():
         st.title("Monthly Dashboard")
         st.write("This section is under construction.")
 
+if __name__ == "__main__":
+    main()
 
