@@ -2,7 +2,10 @@ import pandas as pd
 import streamlit as st
 from datetime import datetime, timedelta
 
-# Define a function to handle file uploads and processing
+from datetime import datetime
+from datetime import datetime, timedelta
+import pandas as pd
+
 def process_uploaded_file(uploaded_file):
     if uploaded_file is not None:
         employee_data = create_employee_dict(uploaded_file)
@@ -40,247 +43,131 @@ def create_employee_dict(csv_file):
     return employee_data
 
 
-# Helper function to convert HH:MM format to total minutes
-def time_to_minutes(time_str):
-    hours, minutes = map(int, time_str.split(':'))
-    return hours * 60 + minutes
+def dailyDuration(employee_dict):
+    # Helper function to convert string time to datetime
+    def time_conversion(time_str):
+        try:
+            return datetime.strptime(time_str, '%H:%M') if time_str != 'NaT' else 'NaT'
+        except ValueError:
+            return 'NaT'
 
-
-# Helper function to convert total minutes to HH:MM format
-def minutes_to_time(total_minutes):
-    hours = total_minutes // 60
-    minutes = total_minutes % 60
-    return f'{int(hours):02}:{int(minutes):02}'
-
-
-def calculate_daily_durations(employee_dict):
-    # Loop through each employee in the dictionary
+    # Iterate through each employee in the dictionary
     for employee, data in employee_dict.items():
-        daily_durations = []  # Initialize list to hold daily durations
-        total_minutes = 0  # Initialize total working minutes
+        in_times = data.get('InTime', [])
+        out_times = data.get('OutTime', [])
+        daily_working_hours = []
+        total_duration = timedelta()  # Initialize total duration
+        valid_days = 0  # Counter for valid days
 
-        # Loop through InTime and OutTime
-        for in_time_str, out_time_str in zip(data['InTime'], data['OutTime']):
-            if in_time_str != 'NaT' and out_time_str != 'NaT':  # Ensure both times are valid
-                # Convert time strings to datetime.time objects
-                in_time = datetime.strptime(in_time_str, '%H:%M').time()
-                out_time = datetime.strptime(out_time_str, '%H:%M').time()
+        # Iterate through each day's InTime and OutTime
+        for in_time_str, out_time_str in zip(in_times, out_times):
+            in_time = time_conversion(in_time_str)
+            out_time = time_conversion(out_time_str)
 
-                # Calculate the duration
-                in_datetime = datetime.combine(datetime.today(), in_time)
-                out_datetime = datetime.combine(datetime.today(), out_time)
+            # Calculate duration only if both InTime and OutTime are available
+            if in_time != 'NaT' and out_time != 'NaT':
+                # Check if OutTime is before InTime (meaning it's past midnight)
+                if out_time < in_time:
+                    # Add 24 hours to the OutTime to account for the next day
+                    out_time += timedelta(hours=24)
 
-                if out_datetime < in_datetime:
-                    out_datetime += timedelta(days=1)  # Handle cases where OutTime is past midnight
+                # Calculate the time difference (working hours)
+                duration = out_time - in_time
+                total_duration += duration  # Add to total duration
+                valid_days += 1  # Increment valid days count
 
-                duration = out_datetime - in_datetime
-                total_hours = duration.total_seconds() // 3600
-                total_minutes_duration = (duration.total_seconds() % 3600) // 60
-                # Append the duration in HH:MM format
-                duration_str = f'{int(total_hours):02}:{int(total_minutes_duration):02}'
-                daily_durations.append(duration_str)
+                # Extract hours and minutes from the duration
+                hours, remainder = divmod(duration.total_seconds(), 3600)
+                minutes = remainder // 60
 
-                # Add the duration to total working minutes
-                daily_minutes = time_to_minutes(duration_str)
-                total_minutes += daily_minutes
+                # Format to HH:MM
+                formatted_duration = f'{int(hours):02}:{int(minutes):02}'
+                daily_working_hours.append(formatted_duration)
             else:
-                daily_durations.append('NaT')
+                # If any time is NaT, add 'NaT' for that day
+                daily_working_hours.append('NaT')
 
-        # Add the dailyDuration key to the employee's dictionary
-        employee_dict[employee]['dailyDuration'] = daily_durations
-        # Calculate and add totalWorkingHours
-        total_working_hours = minutes_to_time(total_minutes)
-        employee_dict[employee]['totalWorkingHours'] = total_working_hours
+        # Add DailyWorkingHours to the employee's data
+        employee_dict[employee]['DailyWorkingHours'] = daily_working_hours
 
-        # Calculate and add averageWorkingHours
-        valid_days = len([d for d in daily_durations if d != 'NaT'])
+        # Calculate total working hours in HH:MM format
+        total_hours, remainder = divmod(total_duration.total_seconds(), 3600)
+        total_minutes = remainder // 60
+        total_working_hours = f'{int(total_hours):02}:{int(total_minutes):02}'
+
+        employee_dict[employee]['TotalWorkingHours'] = total_working_hours
+
+        # Calculate average working hours in HH:MM format
         if valid_days > 0:
-            average_minutes = total_minutes // valid_days
-            employee_dict[employee]['averageWorkingHours'] = minutes_to_time(average_minutes)
+            average_duration = total_duration / valid_days
+            avg_hours, avg_remainder = divmod(average_duration.total_seconds(), 3600)
+            avg_minutes = avg_remainder // 60
+            average_working_hours = f'{int(avg_hours):02}:{int(avg_minutes):02}'
         else:
-            employee_dict[employee]['averageWorkingHours'] = 'NaT'
+            average_working_hours = '00:00'  # Default if no valid days
+
+        employee_dict[employee]['AverageWorkingHours'] = average_working_hours
 
     return employee_dict
 
 
-def Early_over_time_calculation(employee_dict):
-    # Helper function to convert HH:MM format to total minutes
-    def time_to_minutes(time_str):
+def overTimeCalculator(employee_dict):
+    # Helper function to convert time from 'HH:MM' to total seconds
+    def time_to_seconds(time_str):
+        if time_str == 'NaT':
+            return None
         hours, minutes = map(int, time_str.split(':'))
-        return hours * 60 + minutes
+        return hours * 3600 + minutes * 60
 
-    # Helper function to convert total minutes to HH:MM format
-    def minutes_to_time(total_minutes):
-        hours = total_minutes // 60
-        minutes = total_minutes % 60
+    # Helper function to convert total seconds to 'HH:MM' format
+    def seconds_to_time(seconds):
+        if seconds <= 0:
+            return '00:00'
+        hours, remainder = divmod(seconds, 3600)
+        minutes = remainder // 60
         return f'{int(hours):02}:{int(minutes):02}'
 
-    # Loop through each employee in the dictionary
+    # The standard shift duration in seconds (9 hours)
+    standard_shift_seconds = 9 * 3600
+
+    # Iterate through each employee in the dictionary
     for employee, data in employee_dict.items():
-        shift_time_data = {'earlyLeave': [], 'overTime': []}  # Initialize shift-related data
+        daily_working_hours = data.get('DailyWorkingHours', [])
+        actual_overtime = []
+        total_overtime_seconds = 0  # To calculate total overtime
+        real_total_overtime_seconds = 0  # To calculate real total overtime
 
-        # Loop through InTime and OutTime
-        for in_time_str, out_time_str, duration_str in zip(data['InTime'], data['OutTime'], data['dailyDuration']):
-            if in_time_str != 'NaT' and out_time_str != 'NaT':  # Ensure both times are valid
-                in_time = datetime.strptime(in_time_str, '%H:%M').time()
-                out_time = datetime.strptime(out_time_str, '%H:%M').time()
+        # Iterate through each day's working hours
+        for work_hours in daily_working_hours:
+            if work_hours != 'NaT':
+                # Convert the working hours to seconds
+                work_seconds = time_to_seconds(work_hours)
 
-                in_datetime = datetime.combine(datetime.today(), in_time)
-                out_datetime = datetime.combine(datetime.today(), out_time)
+                # Check if the working hours are above the standard shift time
+                if work_seconds > standard_shift_seconds:
+                    # Calculate overtime in seconds
+                    overtime_seconds = work_seconds - standard_shift_seconds
+                    total_overtime_seconds += overtime_seconds  # Add to total overtime
 
-                if out_datetime < in_datetime:
-                    out_datetime += timedelta(days=1)  # Handle cases where OutTime is past midnight
+                    # Only consider overtime greater than 1 hour for real total overtime
+                    if overtime_seconds > 3600:
+                        real_total_overtime_seconds += overtime_seconds
 
-                # Determine dynamic shift end time based on InTime
-                if in_time <= datetime.strptime('10:00', '%H:%M').time():
-                    # If punched in between 09:30 and 10:00
-                    shift_start = max(in_time, datetime.strptime('09:30', '%H:%M').time())
+                    # Convert overtime to 'HH:MM' format
+                    actual_overtime.append(seconds_to_time(overtime_seconds))
                 else:
-                    # If punched in after 10:00, shift starts when punched in
-                    shift_start = in_time
-
-                # Calculate the dynamic shift end time
-                shift_end_datetime = datetime.combine(datetime.today(), shift_start) + timedelta(hours=9)
-                shift_end_time = shift_end_datetime.time()
-
-                # Early Leave Calculation based on expected shift end time
-                if out_datetime < shift_end_datetime:
-                    early_leave_minutes = time_to_minutes(shift_end_time.strftime('%H:%M')) - time_to_minutes(
-                        out_time_str)
-                    # Check if early leave is more than 4 hours (240 minutes)
-                    if early_leave_minutes > 240:
-                        shift_time_data['earlyLeave'].append('00:00')  # Considered half-day, so set to 00:00
-                    else:
-                        shift_time_data['earlyLeave'].append(minutes_to_time(early_leave_minutes))
-                else:
-                    shift_time_data['earlyLeave'].append('00:00')
-
-                # Overtime Calculation
-                shift_minutes = time_to_minutes(shift_end_time.strftime('%H:%M')) - time_to_minutes(in_time_str)
-                daily_minutes = time_to_minutes(duration_str)
-                if daily_minutes > shift_minutes:
-                    overtime_minutes = daily_minutes - shift_minutes
-                    shift_time_data['overTime'].append(minutes_to_time(overtime_minutes))
-                else:
-                    shift_time_data['overTime'].append('00:00')
+                    # No overtime if less than or equal to 9 hours
+                    actual_overtime.append('00:00')
             else:
-                shift_time_data['earlyLeave'].append('NaT')
-                shift_time_data['overTime'].append('NaT')
+                # Handle missing values (NaT) as no overtime
+                actual_overtime.append('NaT')
 
-        # Add shiftTime data to the employee's dictionary
-        employee_dict[employee]['shiftTime'] = shift_time_data
+        # Add actualOvertime, totalOverTime, and realTotalOverTime to the employee's data
+        employee_dict[employee]['actualOvertime'] = actual_overtime
+        employee_dict[employee]['totalOverTime'] = seconds_to_time(total_overtime_seconds)
+        employee_dict[employee]['realTotalOverTime'] = seconds_to_time(real_total_overtime_seconds)
 
     return employee_dict
-
-
-def half_day_calculation(employee_dict):
-    # Helper function to convert HH:MM format to total minutes
-    def time_to_minutes(time_str):
-        hours, minutes = map(int, time_str.split(':'))
-        return hours * 60 + minutes
-
-    # Loop through each employee in the dictionary
-    for employee, data in employee_dict.items():
-        half_day_count = []  # Initialize list to hold half-day counts
-
-        # Loop through dailyDuration
-        for duration_str in data['dailyDuration']:
-            if duration_str != 'NaT':  # Ensure the duration is valid
-                # Convert duration string to minutes
-                daily_minutes = time_to_minutes(duration_str)
-
-                # Check if the working hours are less than 7:30 hours (450 minutes)
-                if daily_minutes < 450:
-                    half_day_count.append(1)
-                else:
-                    half_day_count.append(0)
-            else:
-                half_day_count.append(0)  # NaT is considered as not a half-day
-
-        # Add the halfDayCount key to the employee's dictionary
-        employee_dict[employee]['halfDayCount'] = half_day_count
-
-    return employee_dict
-
-
-def leave_calculation(employee_dict):
-    # Loop through each employee in the dictionary
-    for employee, data in employee_dict.items():
-        absent = []  # Initialize list to hold absence counts
-        missed_punch_out = []  # Initialize list to hold missed punch-out counts
-        missed_punch_in = []  # Initialize list to hold missed punch-in counts
-
-        # Loop through InTime and OutTime
-        for in_time_str, out_time_str in zip(data['InTime'], data['OutTime']):
-            if in_time_str == 'NaT' and out_time_str == 'NaT':
-                # If both InTime and OutTime are NaT, the employee was absent
-                absent.append(1)
-                missed_punch_out.append(0)  # No missed punch since they were absent
-                missed_punch_in.append(0)  # No missed punch since they were absent
-            else:
-                absent.append(0)  # The employee was present
-
-                if in_time_str == 'NaT':
-                    missed_punch_in.append(1)  # Missing punch-in
-                else:
-                    missed_punch_in.append(0)
-
-                if out_time_str == 'NaT':
-                    missed_punch_out.append(1)  # Missing punch-out
-                else:
-                    missed_punch_out.append(0)
-
-        # Add the absent, missedPunchOut, and missedPunchIn keys to the employee's dictionary
-        employee_dict[employee]['absent'] = absent
-        employee_dict[employee]['missedPunchOut'] = missed_punch_out
-        employee_dict[employee]['missedPunchIn'] = missed_punch_in
-
-    return employee_dict
-
-
-def latePunch_calculation(employee_dict):
-    # Helper function to convert HH:MM format to total minutes
-    def time_to_minutes(time_str):
-        hours, minutes = map(int, time_str.split(':'))
-        return hours * 60 + minutes
-
-    # Helper function to convert total minutes to HH:MM format
-    def minutes_to_time(total_minutes):
-        hours = total_minutes // 60
-        minutes = total_minutes % 60
-        return f'{int(hours):02}:{int(minutes):02}'
-
-    # Loop through each employee in the dictionary
-    for employee, data in employee_dict.items():
-        late_by = []  # Initialize list to hold late by hours
-        late_mark = []  # Initialize list to hold late mark (1 or 0)
-
-        # Loop through InTime
-        for in_time_str in data['InTime']:
-            if in_time_str != 'NaT':  # Ensure the time is valid
-                # Convert time string to datetime.time object
-                in_time = datetime.strptime(in_time_str, '%H:%M').time()
-                # Calculate the difference if punched in after 10:00
-                threshold_time = datetime.strptime('10:00', '%H:%M').time()
-                if in_time > threshold_time:
-                    late_minutes = time_to_minutes(in_time_str) - time_to_minutes('10:00')
-                    late_by.append(minutes_to_time(late_minutes))
-                    late_mark.append(1)
-                else:
-                    late_by.append('00:00')
-                    late_mark.append(0)
-            else:
-                late_by.append('NaT')
-                late_mark.append('NaT')
-
-        # Add lateBy and lateMark to the employee's dictionary
-        employee_dict[employee]['lateBy'] = late_by
-        employee_dict[employee]['lateMark'] = late_mark
-
-    return employee_dict
-
-
-from datetime import datetime
 
 
 def dateConversion(employee_dict, month, year):
@@ -319,270 +206,458 @@ def dateConversion(employee_dict, month, year):
 
     return employee_dict
 
-from datetime import datetime
 
-
-def finalCalculations_processing(employee_dict, holidays=None):
-    # If holidays are not provided or empty, set an empty list
-    if not holidays:
-        holidays = []
-
-    # Convert holidays to datetime objects for comparison if there are any holidays
-    holidays = [datetime.strptime(date, '%d-%m-%Y').strftime('%d-%m-%Y') for date in holidays]
+def holidayCalculation(employee_dict, holidays):
+    # Convert holiday dates to datetime objects for easier comparison
+    holidays = pd.to_datetime(holidays, format="%d-%m-%Y").date
 
     for employee, data in employee_dict.items():
-        days = data['Days']
-        status = data['Status']
-        missed_punch_out = data['missedPunchOut']
-        missed_punch_in = data['missedPunchIn']
-        late_marks = data['lateMark']
-        half_day_count = data['halfDayCount']
-        absent = data['absent']
-        early_leave = data['shiftTime']['earlyLeave']
-        overtime = data['shiftTime']['overTime']
-        totalWorkingHours = data['totalWorkingHours']
-        averageWorking = data['averageWorkingHours']
+        days = data['Days']  # List of days
+        status = data['Status']  # Status for each day (P, A, ½P, WO, etc.)
+        in_times = data['InTime']  # In-time for each day (or NaT if absent)
+        out_times = data['OutTime']  # Out-time for each day (or NaT if absent)
 
-        # Initialize totals
-        total_missed_punch_out = 0
-        total_missed_punch_in = 0
-        total_late_marks = 0
-        total_half_days = 0
-        total_absent = 0
-        total_early_leave = 0
-        total_overtime = 0
+        total_present_days = 0  # Initialize count for present days
+        total_absent_days = 0  # Initialize count for absent days
+        absent_days = [0] * len(days)  # Initialize absent days list
+        office_working_days = 0  # Initialize office working days count
 
-        filtered_days = []
+        saturday_adjusted = False  # To track if a Saturday absence has been adjusted
 
+        # Loop through each day of the month
         for i, day in enumerate(days):
-            # Check if the day is Sunday or a holiday
-            if status[i] == 'WO' or day in holidays:
-                continue
+            # Get day of the week and convert current day to a date object
+            day_of_week = pd.to_datetime(day, format="%d-%m-%Y").day_name()
+            current_day = pd.to_datetime(day, format="%d-%m-%Y").date()
 
-            # Calculate totals
-            total_missed_punch_out += missed_punch_out[i]
-            total_missed_punch_in += missed_punch_in[i]
-            total_late_marks += int(late_marks[i]) if late_marks[i] != 'NaT' else 0
-            total_half_days += half_day_count[i]
-            total_absent += absent[i]
-            if early_leave[i] != 'NaT':
-                total_early_leave += int(early_leave[i].split(':')[0]) * 60 + int(early_leave[i].split(':')[1])
-            if overtime[i] != 'NaT':
-                total_overtime += int(overtime[i].split(':')[0]) * 60 + int(overtime[i].split(':')[1])
+            # Skip marking as absent if it's a public holiday
+            if current_day in holidays:
+                absent_days[i] = 0  # Mark holidays as not absent (ignore them)
+                continue  # Skip further checks for this day
 
-            # Keep the day if it's not a Sunday or holiday
-            filtered_days.append(day)
+            # Calculate Total Present Days
+            if status[i] in ['P']:  # Present or Half Present status
+                if in_times[i] != 'NaT' or out_times[i] != 'NaT':  # Either InTime or OutTime should be available
+                    total_present_days += 1  # Count this day as present
+            if status[i] in ['½P']:
+                if in_times[i] != 'NaT' or out_times[i] != 'NaT':
+                    total_present_days += 0.5
 
-        # Convert total minutes into HH:MM format
-        early_leave_hours = total_early_leave // 60
-        early_leave_minutes = total_early_leave % 60
-        total_early_leave_formatted = f"{early_leave_hours:02}:{early_leave_minutes:02}"
-
-        overtime_hours = total_overtime // 60
-        overtime_minutes = total_overtime % 60
-        total_overtime_formatted = f"{overtime_hours:02}:{overtime_minutes:02}"
-
-        # Store the totals in the employee's report dictionary
-        employee_dict[employee]['report_dict'] = {
-            'totalWorkingHours': totalWorkingHours,
-            'averageDailyWorking': averageWorking,
-            'totalAbsent': total_absent - 1,
-            'totalHalfDay': total_half_days,
-            'totalLatePunch': total_late_marks,
-            'totalMissedPunchOut': total_missed_punch_out,
-            'totalMissedPunchIn': total_missed_punch_in,
-            'totalOverTime': total_overtime_formatted,
-            'totalEarlyLeave': total_early_leave_formatted,
-        }
-        # Update the Days to only include working days (non-Sunday, non-holiday)
-        employee_dict[employee]['Days'] = filtered_days
-    return employee_dict
-
-
-def present_calculator(employee_dict, holidays=None):
-    # If holidays are not provided or empty, set an empty list
-    if not holidays:
-        holidays = []
-
-    # Convert holidays to datetime objects for comparison if any are provided
-    holidays = [datetime.strptime(holiday, '%d-%m-%Y') for holiday in holidays]
-
-    # Loop through each employee in the dictionary
-    for employee, data in employee_dict.items():
-        days = data['Days']
-        statuses = data['Status']
-        absent = data['report_dict']['totalAbsent']
-        halfday = data['report_dict']['totalHalfDay'] / 2
-        latepunch = data['report_dict']['totalLatePunch']
-
-        # Calculate latepunch adjustment if latepunch is 3 or more
-        if latepunch >= 3:
-            if latepunch % 3 == 0:
-                latepunch = latepunch / 3
+            # Calculate Absent Days (skip weekly off days)
+            if status[i] == 'WO':  # Weekly off
+                absent_days[i] = 0  # Mark weekly offs as not absent (ignore them)
+            elif status[i] == 'A' or (in_times[i] == 'NaT' and out_times[i] == 'NaT'):
+                absent_days[i] = 1  # Mark day as absent
             else:
-                if latepunch % 2 == 0:
-                    for i in range(1, latepunch):
-                        if (latepunch - i) % 3 == 0:
-                            latepunch = (latepunch - i) / 3
-                            break
-                else:
-                    for i in range(1, latepunch):
-                        if (latepunch - i) % 3 == 0:
-                            latepunch = (latepunch - i) / 3
-                            break
+                absent_days[i] = 0  # Mark day as not absent
 
-            # After the division by 3, divide the result by 2
-            latepunch = latepunch / 2
-        else:
-            latepunch = 0  # Set latepunch to 0 if it's less than 3
+            # Adjust for Saturday Absence
+            if absent_days[i] == 1 and day_of_week == 'Saturday' and not saturday_adjusted:
+                absent_days[i] = 0  # Ignore one Saturday absence
+                saturday_adjusted = True  # Mark that a Saturday absence has been adjusted
 
-        # Calculate total working days
-        total_working_days = 0
-        for day, status in zip(days, statuses):
+        # Calculate Total Absent Days (after adjusting for one Saturday)
+        total_absent_days = sum(absent_days)
+
+        # Add calculated values back to employee_dict
+        employee_dict[employee]['AbsentDays'] = absent_days
+        employee_dict[employee]['TotalAbsentDays'] = total_absent_days
+        employee_dict[employee]['TotalPresentDays'] = total_present_days
+
+    return employee_dict
+
+
+def compOffCalculation(employee_dict):
+    """
+    Calculates compensatory off (comp-off) for each employee based on their Saturday attendance.
+
+    Args:
+        employee_dict (dict): A dictionary where each key is an employee's name and the value is a
+                              dictionary containing their attendance information.
+
+    Returns:
+        dict: Updated employee_dict with comp-off days calculated for each employee.
+    """
+    # Iterate over all employees
+    for employee in employee_dict.keys():
+        # Initialize comp_off if it doesn't exist
+        employee_dict[employee]['comp_off'] = 0  # Default to 0
+
+        # List to hold all Saturdays in the month
+        saturdays = []
+
+        # Iterate over all days in the month
+        for i, day in enumerate(employee_dict[employee]['Days']):
+            # Assuming day is in 'dd-mm-yyyy' format, adjust as necessary
             day_date = datetime.strptime(day, '%d-%m-%Y')
-            # Check if the day is not a Sunday (weekday 6) and not a holiday
-            if day_date.weekday() != 6 and day_date not in holidays:
-                total_working_days += 1
+            if day_date.strftime('%A') == 'Saturday':  # Check if it's a Saturday
+                saturdays.append(i)
 
-        total_working_days = total_working_days - 1  # Subtracting 1 based on your logic
+        # Check if any Saturday has an absence (status 'A')
+        has_absent_on_saturday = any(employee_dict[employee]['Status'][i] == 'A' for i in saturdays)
 
-        # Calculate total present days
-        total_present_days = total_working_days - (absent + halfday)
-
-        # Update the report_dict
-        if 'report_dict' not in data:
-            employee_dict[employee]['report_dict'] = {}
-
-        employee_dict[employee]['report_dict']['totalWorkingDays'] = total_working_days
-        employee_dict[employee]['report_dict']['totalPresentDays'] = total_present_days
-        employee_dict[employee]['report_dict']['totalMinusBeauseLateDays'] = latepunch
+        # Set comp_off based on attendance on Saturdays
+        if has_absent_on_saturday:
+            employee_dict[employee]['comp_off'] = 0  # Absence found, comp_off remains 0
+        else:
+            employee_dict[employee]['comp_off'] = 1  # No absence found, set comp_off to 1
 
     return employee_dict
 
-def report_dataframe_creator(employee_dict):
-    # Initialize an empty list to store the data for the DataFrame
-    report_data = []
 
-    # Iterate over each employee in the dictionary
-    for employee, details in employee_dict.items():
-        # Extract the report_dict for the current employee
-        report_dict = details.get('report_dict', {})
+def total_workingdays_calculation(employee_dict, holidays=[]):
+    """
+    Calculates the total number of office working days for each employee based on weekends, holidays,
+    and other conditions like non-working days.
 
-        # Add the employee's name to the report_dict
-        report_dict['Employee Name'] = employee
+    Args:
+        employee_dict (dict): A dictionary where each key is an employee's name and the value is a
+                              dictionary containing their attendance information.
+        holidays (list): A list of holidays in the format 'dd-mm-yyyy'.
 
-        # Append the report_dict as a row to the report_data list
-        report_data.append(report_dict)
+    Returns:
+        dict: Updated employee_dict with total office working days calculated for each employee.
+    """
+    # Iterate over all employees
+    for employee in employee_dict.keys():
+        # Initialize totalOfficeWorkingDays if it doesn't exist
+        if 'totalOfficeWorkingDays' not in employee_dict[employee]:
+            employee_dict[employee]['totalOfficeWorkingDays'] = 0
 
-    # Convert the list of dictionaries into a DataFrame
-    monthlyReportDataframe = pd.DataFrame(report_data)
+        # List to store all weekend (WO) days
+        weekends = [i for i, status in enumerate(employee_dict[employee]['Status']) if status == 'WO']
 
-    # Set the 'Employee Name' column as the index
-    monthlyReportDataframe.set_index('Employee Name', inplace=True)
+        # List to store all holiday indices
+        holidays_indices = []
+        for i, day in enumerate(employee_dict[employee]['Days']):
+            if day in holidays:
+                holidays_indices.append(i)
 
-    return monthlyReportDataframe
+        # Count total days in the month
+        total_days_in_month = len(employee_dict[employee]['Days'])
+
+        # Calculate total office working days
+        # Subtract weekends (WO), holidays, and subtract 1 (as per your logic)
+        total_wo_days = len(weekends)
+        total_holiday_days = len(holidays_indices)
+
+        total_office_working_days = total_days_in_month - total_wo_days - total_holiday_days - 1
+
+        # Update employee_dict with the calculated totalOfficeWorkingDays
+        employee_dict[employee]['totalOfficeWorkingDays'] = total_office_working_days
+
+    return employee_dict
 
 
-def actual_overtime_calculation(employee_dict):
+def halfDaysCalculation(employee_dict):
     for employee, data in employee_dict.items():
-        overtimes = data['shiftTime']['overTime']
-        actual_overtime = timedelta(0)  # Initialize total actual overtime
+        daily_working_hours = data['DailyWorkingHours']
+        status_list = data['Status']  # Assuming the status list is under 'Status'
 
-        for overtime in overtimes:
-            if overtime != 'NaT':
-                overtime_duration = datetime.strptime(overtime, '%H:%M') - datetime(1900, 1, 1)
-                if overtime_duration > timedelta(hours=1):  # Consider only overtime more than 1 hour
-                    actual_overtime += overtime_duration
+        # Define half day criteria (6 hours and 30 minutes)
+        half_day_limit = pd.to_timedelta('7:30:00')
 
-        # Convert total actual overtime back to 'HH:MM' format and store in the dictionary
-        total_actual_overtime = (datetime(1900, 1, 1) + actual_overtime).strftime('%H:%M')
-        data['report_dict']['actualOverTime'] = total_actual_overtime
+        # Initialize lists to store half day info
+        is_half_day = []
+        total_half_day = 0
+
+        # Loop through daily working hours to determine half days
+        for idx, working_hours in enumerate(daily_working_hours):
+            if working_hours != 'NaT':
+                # Ensure the time is in 'hh:mm:ss' format by appending ':00' if necessary
+                if len(working_hours) == 5:  # If the time is in 'hh:mm' format
+                    working_hours += ':00'
+
+                # Convert string to timedelta
+                try:
+                    working_duration = pd.to_timedelta(working_hours)
+                except ValueError as e:
+                    print(f"Error converting time {working_hours}: {e}")
+                    is_half_day.append(0)
+                    continue
+
+                # Check if working duration is less than half-day limit
+                if working_duration < half_day_limit:
+                    is_half_day.append(1)
+                    total_half_day += 1
+                    # Update the status to '½P'
+                    status_list[idx] = '½P'
+                else:
+                    is_half_day.append(0)
+            else:
+                # If NaT (absent day or weekly off), not a half day
+                is_half_day.append(0)
+
+        # Add the new keys to employee data
+        employee_dict[employee]['isHalfDay'] = is_half_day
+        employee_dict[employee]['totalHalfDay'] = total_half_day
+        employee_dict[employee]['Status'] = status_list  # Update the status list in employee data
 
     return employee_dict
 
 
-def time_str_to_timedelta(time_str):
-    if time_str == 'NaT':
+def lateAndEarlyLeaveCalculation(employee_dict):
+    for employee, data in employee_dict.items():
+        in_times = data['InTime']
+        out_times = data['OutTime']
+        working_hours = data['DailyWorkingHours']
+        is_half_day = data.get('isHalfDay', [])  # Retrieve isHalfDay if available
+
+        # Initialize lists to store late and early leave info
+        is_late = []
+        early_leave = []
+        total_late_punch = 0
+        total_early_leave_duration = timedelta(0)  # Initialize as a timedelta object
+
+        # Define shift start times and duration expectations
+        shift_start_time = pd.to_datetime('09:30:00', format='%H:%M:%S').time()
+        latest_allowed_time = pd.to_datetime('10:00:00', format='%H:%M:%S').time()
+        work_duration = pd.to_timedelta('9:00:00')  # 9-hour working day
+
+        # Loop through the in_times and out_times to calculate late coming and early leave
+        for i, (in_time, out_time, daily_hours, half_day) in enumerate(
+                zip(in_times, out_times, working_hours, is_half_day)):
+            # Late coming check
+            if in_time != 'NaT':
+                in_time_obj = pd.to_datetime(in_time, format='%H:%M').time()
+                if in_time_obj > latest_allowed_time:
+                    is_late.append(1)
+                    total_late_punch += 1
+                else:
+                    is_late.append(0)
+            else:
+                is_late.append(0)
+
+            # Early leave check
+            if out_time != 'NaT' and in_time != 'NaT' and half_day == 0:
+                in_time_obj = pd.to_datetime(in_time, format='%H:%M')
+                out_time_obj = pd.to_datetime(out_time, format='%H:%M')
+
+                # Calculate the expected out time (in time + 9 hours)
+                expected_out_time = in_time_obj + work_duration
+
+                # Check if the employee left early
+                if out_time_obj < expected_out_time:
+                    early_duration = expected_out_time - out_time_obj
+
+                    # Format the early leave duration to HH:MM by stripping "days"
+                    early_leave_formatted = str(early_duration).split(' ')[-1][:5]  # Extract only HH:MM
+                    early_leave.append(early_leave_formatted)
+                    total_early_leave_duration += early_duration  # Accumulate early leave time
+                else:
+                    early_leave.append('00:00')
+            else:
+                early_leave.append('00:00')  # No early leave if half day or absent
+
+        # Calculate latePunchMinus based on total_late_punch
+        latePunchMinus = total_late_punch // 3  # Every 3 late marks count as 1 half-day
+        latePunchMinus = round(latePunchMinus / 2, 0)
+
+        # Convert the total_early_leave_duration to HH:MM format
+        total_hours, remainder = divmod(total_early_leave_duration.seconds, 3600)
+        total_minutes = remainder // 60
+        total_early_leave_formatted = f"{total_hours:02}:{total_minutes:02}"
+
+        # Add the new keys to employee data
+        employee_dict[employee]['isLate'] = is_late
+        employee_dict[employee]['totalLatePunch'] = total_late_punch
+        employee_dict[employee]['earlyLeave'] = early_leave
+        employee_dict[employee]['totalEarlyLeave'] = total_early_leave_formatted
+        employee_dict[employee]['latePunchMinus'] = latePunchMinus  # Add latePunchMinus to employee data
+
+    return employee_dict
+
+
+def convert_time_to_timedelta(time_str):
+    """Convert a time string like '05:09' to a timedelta object."""
+    if time_str == 'NaT' or time_str == '00:00':
         return timedelta(0)
     hours, minutes = map(int, time_str.split(':'))
     return timedelta(hours=hours, minutes=minutes)
 
 
-def timedelta_to_str(td):
-    total_minutes = td.total_seconds() // 60
-    hours = int(total_minutes // 60)
-    minutes = int(total_minutes % 60)
-    return f'{hours:02}:{minutes:02}'
-
-
-def adjustment(employee_dict):
+def finalProcessing(employee_dict):
+    # Loop through each employee in the dictionary
     for employee, data in employee_dict.items():
-        daily_durations = data['dailyDuration']
-        total_early_leave = time_str_to_timedelta(data['report_dict']['totalEarlyLeave'])
+        # 1. Add totalHalfDay/2 to TotalAbsentDays
+        if data['TotalAbsentDays'] != 0:
+            data['TotalAbsentDays'] = data['TotalAbsentDays'] + (data['totalHalfDay'] / 2) - data['comp_off']
+            data['comp_off'] = 0
+        elif data['TotalAbsentDays'] != 0:
+            data['TotalAbsentDays'] = data['TotalAbsentDays'] + (data['totalHalfDay'] / 2)
 
-        # Calculate total time for durations less than 5 hours (half-day)
-        total_under_5hrs = timedelta(0)
+        # 2. Calculate adjustableOverTime = totalOverTime - realTotalOverTime
+        total_overtime = convert_time_to_timedelta(data['totalOverTime'])
+        real_total_overtime = convert_time_to_timedelta(data['realTotalOverTime'])
 
-        for duration, half_day in zip(daily_durations, data['halfDayCount']):
-            daily_duration_td = time_str_to_timedelta(duration)
+        adjustable_overtime = total_overtime - real_total_overtime
+        data['adjustableOverTime'] = str(adjustable_overtime)[:-3]  # store in 'HH:MM' format
 
-            # If duration is less than 5 hours, consider it a half-day
-            if half_day == 1:
-                total_under_5hrs += daily_duration_td
+        if data['TotalPresentDays'] > data['totalOfficeWorkingDays']:
+            extra_day = data['TotalPresentDays'] - data['totalOfficeWorkingDays']
+            data['comp_off'] = data['comp_off']
 
-        # Subtract the total time for half-days from the total early leave
-        updated_total_early_leave = total_early_leave - total_under_5hrs
-
-        # Update the report_dict in employee_dict
-        data['report_dict']['totalEarlyLeave'] = timedelta_to_str(updated_total_early_leave)
+            data['TotalPresentDays'] = data['TotalPresentDays'] - extra_day
 
     return employee_dict
 
 
-def calculation_adjustments(df):
-    # Helper function to convert HH:MM format to total minutes
-    def time_to_minutes(time_str):
-        hours, minutes = map(int, time_str.split(':'))
-        return hours * 60 + minutes
+def dict_to_dataframe(employee_dict):
+    # Convert the dictionary to a DataFrame
+    df = pd.DataFrame.from_dict({
+        key: {**value, 'Employee': key} for key, value in employee_dict.items()
+    }, orient='index')
 
-    # Helper function to convert total minutes to HH:MM format
-    def minutes_to_time(total_minutes):
-        hours = total_minutes // 60
-        minutes = total_minutes % 60
-        return f'{int(hours):02}:{int(minutes):02}'
+    # Reset index to make 'Employee' a column
+    df.reset_index(drop=True, inplace=True)
 
-    # Convert totalOverTime and totalEarlyLeave to total minutes
-    df['totalOverTimeMinutes'] = df['totalOverTime'].apply(lambda x: time_to_minutes(x) if pd.notnull(x) else 0)
-    df['totalEarlyLeaveMinutes'] = df['totalEarlyLeave'].apply(lambda x: time_to_minutes(x) if pd.notnull(x) else 0)
-
-    # Calculate adjustedOverTime in minutes (totalOverTime - totalEarlyLeave)
-    df['adjustOverTimeMinutes'] = df['totalOverTimeMinutes'] - df['totalEarlyLeaveMinutes']
-
-    # Convert adjustedOverTime back to HH:MM format
-    df['adjustOverTime'] = df['adjustOverTimeMinutes'].apply(lambda x: minutes_to_time(x) if x >= 0 else '00:00')
-
-    # Drop the intermediate minute columns (optional)
-    df = df.drop(columns=['totalOverTimeMinutes', 'totalEarlyLeaveMinutes', 'adjustOverTimeMinutes'])
-
-    # Rearrange columns in the specified order
+    # Define the desired column order
     column_order = [
-        'totalWorkingDays',
-        'totalPresentDays',
-        'totalWorkingHours',
-        'averageDailyWorking',
-        'totalAbsent',
-        'totalHalfDay',
-        'totalLatePunch',
-        'totalMissedPunchOut',
-        'totalMissedPunchIn',
-        'totalEarlyLeave',
-        'totalOverTime',
-        'actualOverTime',
-        'adjustOverTime',
-        'totalMinusBeauseLateDays'
+        'Employee', 'totalOfficeWorkingDays', 'TotalAbsentDays', 'TotalPresentDays', 'latePunchMinus', 'totalHalfDay',
+        'comp_off',
+        'totalLatePunch', 'TotalWorkingHours', 'AverageWorkingHours',
+        'totalOverTime', 'realTotalOverTime', 'adjustableOverTime', 'totalEarlyLeave',
+
     ]
 
-    # Reorder the DataFrame columns
-    df = df[column_order]
-
+    # Reorder the columns
+    df = df.reindex(columns=column_order)
     return df
+
+####
+def process_employee_hroneData(file_path):
+    # Read the Excel file
+    df = pd.read_excel(file_path)
+
+    # Extract the columns with date data (adjust month filtering as needed)
+    date_columns = [col for col in df.columns if 'Aug' in col or 'Jul' in col or 'Sep' in col or 'Jan' in col
+                    or 'Feb' in col or 'Mar' in col or 'Apr' in col or 'May' in col or 'Jun' in col or 'Oct' in col
+                    or 'Nov' in col or 'Dec' in col]
+
+    # Initialize the employee dictionary
+    employee_dict = {}
+
+    # Loop through each employee
+    for idx, row in df.iterrows():
+        employee_name = row['Full name']  # Assuming 'Full name' is the column for employee names
+        employee_dict[employee_name] = {"Days": [], "Status": [], "InTime": [], "OutTime": []}
+
+        # Process each date column
+        for date in date_columns:
+            shift_data = str(row[date])  # Get the shift data for that day
+
+            if '|' in shift_data:
+                # Split the shift data by '|' and extract InTime and OutTime
+                shift_parts = shift_data.split('|')
+
+                # Handle InTime and OutTime: if '--:--', return NaT
+                in_time = shift_parts[2].strip() if len(shift_parts) > 2 and shift_parts[
+                    2].strip() != '--:--' else 'NaT'
+                out_time = shift_parts[3].strip() if len(shift_parts) > 3 and shift_parts[
+                    3].strip() != '--:--' else 'NaT'
+            else:
+                # If the data is missing or not properly formatted
+                in_time, out_time = 'NaT', 'NaT'
+
+            # Append the date, InTime, and OutTime to the employee's dictionary
+            employee_dict[employee_name]["Days"].append(date)
+            employee_dict[employee_name]["InTime"].append(in_time)
+            employee_dict[employee_name]["OutTime"].append(out_time)
+            employee_dict[employee_name]["Status"].append('')  # Status remains empty for now
+
+    return employee_dict
+
+
+from datetime import datetime
+
+
+def dict_cleaning(employee_dict):
+    # Loop through each employee in the dictionary
+    for employee, data in employee_dict.items():
+        # Extract the list of days and their corresponding statuses
+        days = data['Days']
+        status = data['Status']
+
+        # Loop through the days to find Sundays and update the status
+        for i, day in enumerate(days):
+            # Convert the string day to a datetime object
+            date_object = pd.to_datetime(day, format="%d %b %Y")
+            # Get the day of the week
+            day_of_week = date_object.day_name()  # e.g., 'Monday'
+            # Format the date to 'DD-MM-YYYY, Day'
+            formatted_day = date_object.strftime('%d-%m-%Y') + ', ' + day_of_week
+
+            # Update the Days with the formatted date
+            days[i] = formatted_day
+
+            # Check if the day is a Sunday and update the status accordingly
+            if day_of_week == 'Sunday':
+                status[i] = 'WO'  # Update status to 'WO' for Sundays
+
+        # Update the employee's data with the modified lists
+        data['Days'] = days
+        data['Status'] = status
+
+    # Return the updated employee dictionary
+    return employee_dict
+
+
+def statusFilling(employee_dict):
+    # Iterate over each employee in the dictionary
+    for employee, data in employee_dict.items():
+        # Get the lists of InTime, OutTime, and Status for the employee
+        in_times = data['InTime']
+        out_times = data['OutTime']
+        status = data['Status']
+
+        # Iterate over each day and fill in the status
+        for i in range(len(status)):
+            # If the status is already 'WO', skip the day
+            if status[i] == 'WO':
+                continue
+
+            # Check InTime and OutTime for filling status
+            in_time = in_times[i]
+            out_time = out_times[i]
+
+            if in_time == 'NaT' and out_time == 'NaT':
+                # Absent if both InTime and OutTime are NaT
+                status[i] = 'A'
+            elif in_time != 'NaT' and out_time != 'NaT':
+                # Present if both InTime and OutTime are valid
+                status[i] = 'P'
+            else:
+                # Half-Day if one of them is NaT
+                status[i] = 'P'
+
+        # Update the dictionary with the modified status list
+        employee_dict[employee]['Status'] = status
+
+    return employee_dict
+
+
+def minorprocessing(employee_dict):
+    for employee, data in employee_dict.items():
+        if 'Days' in data:
+            # Iterate over the list of dates
+            updated_days = []
+            for day in data['Days']:
+                # Split the string by comma and take only the date part
+                date_part = day.split(',')[0].strip()
+                updated_days.append(date_part)
+
+            # Update the 'Days' list with the modified dates
+            employee_dict[employee]['Days'] = updated_days
+    return employee_dict
+
+
+def merge_dictionaries(employee_dict, employee_dict_hrone):
+    # Iterate through each key-value pair in employee_dict_hrone
+    for employee, data in employee_dict_hrone.items():
+        # Check if the employee key is not already in employee_dict
+        if employee not in employee_dict:
+            # Add the employee and their data to employee_dict
+            employee_dict[employee] = data
+
+    return employee_dict
+
