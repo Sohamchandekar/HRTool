@@ -6,6 +6,10 @@ from datetime import datetime
 from datetime import datetime, timedelta
 import pandas as pd
 
+from datetime import datetime
+from datetime import datetime, timedelta
+import pandas as pd
+import streamlit as st
 def process_uploaded_file(uploaded_file):
     if uploaded_file is not None:
         employee_data = create_employee_dict(uploaded_file)
@@ -267,6 +271,67 @@ def holidayCalculation(employee_dict, holidays):
     return employee_dict
 
 
+def adjust_wop_hours(employee_dict):
+    # Helper function to convert time string (e.g., "10:34") to timedelta
+    def convert_to_timedelta(time_str):
+        try:
+            hours, minutes = map(int, time_str.split(':'))
+            return timedelta(hours=hours, minutes=minutes)
+        except Exception as e:
+            print(f"Error converting time string {time_str}: {e}")
+            return timedelta(0)
+
+    # Loop through all employees in the employee_dict
+    for employee in employee_dict:
+        # Convert totalOverTime to timedelta
+        total_overtime = convert_to_timedelta(employee_dict[employee].get('totalOverTime', '0:00'))
+        comp_off_sunday = employee_dict[employee].get('comp_off_sunday', 0)  # Get existing comp_off or start at 0
+
+        print(f"Initial totalOverTime for {employee}: {total_overtime}")
+
+        # Adjust overtime by adding WOP hours and updating comp_off
+        for i, status in enumerate(employee_dict[employee]['Status']):
+            daily_working_hours = convert_to_timedelta(employee_dict[employee]['DailyWorkingHours'][i])
+
+            if status == 'WOP':
+                # Add daily working hours to total overtime if WOP
+                total_overtime += daily_working_hours
+
+                # Add to comp_off based on working hours
+                if daily_working_hours >= timedelta(hours=6):
+                    comp_off_sunday += 1  # Full comp off for more than 6 hours
+                else:
+                    comp_off_sunday += 0.5  # Half comp off for less than 6 hours
+
+                print(f"Added {daily_working_hours} to totalOverTime for {employee}. New total: {total_overtime}")
+
+                # Change the status from WOP to WO
+                employee_dict[employee]['Status'][i] = 'WO'
+
+            elif status == 'WO½P':
+                # Add daily working hours to total overtime if WO½P
+                total_overtime += daily_working_hours
+
+                # Add to comp_off based on working hours
+                if daily_working_hours >= timedelta(hours=6):
+                    comp_off_sunday += 1  # Full comp off for more than 6 hours
+                else:
+                    comp_off_sunday += 0.5  # Half comp off for less than 6 hours
+
+                print(f"Added {daily_working_hours} to totalOverTime for {employee}. New total: {total_overtime}")
+                # Change the status from WO½P to WO
+                employee_dict[employee]['Status'][i] = 'WO'
+
+        # Update totalOverTime in HH:MM format
+        total_hours, remainder = divmod(total_overtime.total_seconds(), 3600)
+        total_minutes = remainder // 60
+        employee_dict[employee]['totalOverTime'] = f"{int(total_hours):02}:{int(total_minutes):02}"
+        # Update comp_off key in employee_dict
+        employee_dict[employee]['comp_off_sunday'] = comp_off_sunday
+
+    return employee_dict
+
+
 def compOffCalculation(employee_dict):
     """
     Calculates compensatory off (comp-off) for each employee based on their Saturday attendance.
@@ -280,12 +345,8 @@ def compOffCalculation(employee_dict):
     """
     # Iterate over all employees
     for employee in employee_dict.keys():
-        # Initialize comp_off if it doesn't exist
-        employee_dict[employee]['comp_off'] = 0  # Default to 0
-
         # List to hold all Saturdays in the month
         saturdays = []
-
         # Iterate over all days in the month
         for i, day in enumerate(employee_dict[employee]['Days']):
             # Assuming day is in 'dd-mm-yyyy' format, adjust as necessary
@@ -344,6 +405,7 @@ def total_workingdays_calculation(employee_dict, holidays=[]):
         total_office_working_days = total_days_in_month - total_wo_days - total_holiday_days - 1
 
         # Update employee_dict with the calculated totalOfficeWorkingDays
+        employee_dict[employee]['workingDaysAccordingToCal'] = total_office_working_days
         employee_dict[employee]['totalOfficeWorkingDays'] = total_office_working_days
 
     return employee_dict
@@ -354,8 +416,13 @@ def halfDaysCalculation(employee_dict):
         daily_working_hours = data['DailyWorkingHours']
         status_list = data['Status']  # Assuming the status list is under 'Status'
 
-        # Define half day criteria (6 hours and 30 minutes)
+        # Define half day criteria (7 hours and 30 minutes)
         half_day_limit = pd.to_timedelta('7:30:00')
+
+        # Reset status to 'P' for days that are '½P' or 'P', excluding 'A' and 'WO'
+        for idx, status in enumerate(status_list):
+            if status in ['½P', 'P']:
+                status_list[idx] = 'P'
 
         # Initialize lists to store half day info
         is_half_day = []
@@ -363,6 +430,11 @@ def halfDaysCalculation(employee_dict):
 
         # Loop through daily working hours to determine half days
         for idx, working_hours in enumerate(daily_working_hours):
+            # Exclude days with status 'WO'
+            if status_list[idx] == 'WO':
+                is_half_day.append(0)  # Not a half day
+                continue
+
             if working_hours != 'NaT':
                 # Ensure the time is in 'hh:mm:ss' format by appending ':00' if necessary
                 if len(working_hours) == 5:  # If the time is in 'hh:mm' format
@@ -483,8 +555,10 @@ def finalProcessing(employee_dict):
         if data['TotalAbsentDays'] != 0:
             data['TotalAbsentDays'] = data['TotalAbsentDays'] + (data['totalHalfDay'] / 2) - data['comp_off']
             data['comp_off'] = 0
-        elif data['TotalAbsentDays'] != 0:
-            data['TotalAbsentDays'] = data['TotalAbsentDays'] + (data['totalHalfDay'] / 2)
+
+        if data['TotalAbsentDays'] < 0:
+            data['comp_off'] = data['comp_off'] + abs(data['TotalAbsentDays'])
+            data['TotalAbsentDays'] = 0
 
         # 2. Calculate adjustableOverTime = totalOverTime - realTotalOverTime
         total_overtime = convert_time_to_timedelta(data['totalOverTime'])
@@ -496,8 +570,9 @@ def finalProcessing(employee_dict):
         if data['TotalPresentDays'] > data['totalOfficeWorkingDays']:
             extra_day = data['TotalPresentDays'] - data['totalOfficeWorkingDays']
             data['comp_off'] = data['comp_off']
-
             data['TotalPresentDays'] = data['TotalPresentDays'] - extra_day
+
+        data['TotalCompOff'] = data['comp_off'] + data['comp_off_sunday']
 
     return employee_dict
 
@@ -514,7 +589,7 @@ def dict_to_dataframe(employee_dict):
     # Define the desired column order
     column_order = [
         'Employee', 'totalOfficeWorkingDays', 'TotalAbsentDays', 'TotalPresentDays', 'latePunchMinus', 'totalHalfDay',
-        'comp_off',
+        'TotalCompOff',
         'totalLatePunch', 'TotalWorkingHours', 'AverageWorkingHours',
         'totalOverTime', 'realTotalOverTime', 'adjustableOverTime', 'totalEarlyLeave',
 
@@ -524,7 +599,9 @@ def dict_to_dataframe(employee_dict):
     df = df.reindex(columns=column_order)
     return df
 
-####
+
+########################
+
 def process_employee_hroneData(file_path):
     # Read the Excel file
     df = pd.read_excel(file_path)
@@ -660,4 +737,5 @@ def merge_dictionaries(employee_dict, employee_dict_hrone):
             employee_dict[employee] = data
 
     return employee_dict
+
 
