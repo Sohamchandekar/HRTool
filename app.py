@@ -8,7 +8,7 @@ from plotly.subplots import make_subplots
 
 from Backend import create_employee_dict, dailyDuration, overTimeCalculator, dateConversion, holidayCalculation, halfDaysCalculation
 from Backend import lateAndEarlyLeaveCalculation, compOffCalculation,total_workingdays_calculation,merge_dictionaries
-from Backend import finalProcessing, dict_to_dataframe, process_uploaded_file
+from Backend import finalProcessing, dict_to_dataframe, process_uploaded_file, adjust_wop_hours
 from Backend import process_employee_hroneData,dict_cleaning,statusFilling,minorprocessing
 
 st.set_page_config(layout="wide")
@@ -69,11 +69,12 @@ def main():
                     employee_dict = merge_dictionaries(employee_dict, employee_dict_hrone)
                     employee_dict = dailyDuration(employee_dict)
                     employee_dict = overTimeCalculator(employee_dict)
+                    employee_dict = adjust_wop_hours(employee_dict)
+                    employee_dict = total_workingdays_calculation(employee_dict, holidays=holidays_list)
                     employee_dict = halfDaysCalculation(employee_dict)
                     employee_dict = holidayCalculation(employee_dict, holidays=holidays_list)
-                    employee_dict = compOffCalculation(employee_dict)
-                    employee_dict = total_workingdays_calculation(employee_dict, holidays=holidays_list)
                     employee_dict = lateAndEarlyLeaveCalculation(employee_dict)
+                    employee_dict = compOffCalculation(employee_dict)
                     employee_dict = finalProcessing(employee_dict)
                     data = dict_to_dataframe(employee_dict)
 
@@ -165,7 +166,7 @@ def main():
 
             # Total Compensatory Leaves Card
             with col4:
-                employeeCompoffs = employee_data['comp_off']
+                employeeCompoffs = employee_data['TotalCompOff']
                 st.markdown(f"""
                     <div class="card">
                         <div class="card-title">Compensatory Leaves</div>
