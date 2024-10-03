@@ -569,11 +569,10 @@ def finalProcessing(employee_dict):
 
         if data['TotalPresentDays'] > data['totalOfficeWorkingDays']:
             extra_day = data['TotalPresentDays'] - data['totalOfficeWorkingDays']
-            data['comp_off'] = data['comp_off']
+            data['comp_off'] = data['comp_off'] + extra_day
             data['TotalPresentDays'] = data['TotalPresentDays'] - extra_day
-
+            
         data['TotalCompOff'] = data['comp_off'] + data['comp_off_sunday']
-
     return employee_dict
 
 
