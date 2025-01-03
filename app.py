@@ -65,7 +65,7 @@ def main():
 
                 # Button to generate the report
                 if st.button("Generate Report"):
-                    employee_dict = dateConversion(employee_dict, month=month, year='2025')
+                    employee_dict = dateConversion(employee_dict, month=month, year='2024')
                     employee_dict = merge_dictionaries(employee_dict, employee_dict_hrone)
                     employee_dict = dailyDuration(employee_dict)
                     employee_dict = overTimeCalculator(employee_dict)
@@ -82,7 +82,7 @@ def main():
                     st.session_state.employee_dict = employee_dict
                     # st.session_state.data = data
 
-                    st.write(f"Employee Report For {month} 2025:")
+                    st.write(f"Employee Report For {month} 2024:")
                     st.write(data)
 
                     csv = data.to_csv(index=False).encode('utf-8')
