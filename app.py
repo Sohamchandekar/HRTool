@@ -65,8 +65,8 @@ def main():
 
                 # Button to generate the report
                 if st.button("Generate Report"):
-                    employee_dict = dateConversion(employee_dict, month=month, year='2024')
                     employee_dict = merge_dictionaries(employee_dict, employee_dict_hrone)
+                    employee_dict = dateConversion(employee_dict, month=month, year='2024')
                     employee_dict = dailyDuration(employee_dict)
                     employee_dict = overTimeCalculator(employee_dict)
                     employee_dict = adjust_wop_hours(employee_dict)
